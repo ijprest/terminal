@@ -20,6 +20,15 @@ namespace winrt::Microsoft::Terminal::Control::implementation
         return modifiers;
     }
 
+    // Returns true if both arguments are not zero and equal each other.
+    template<typename T>
+    static bool nonZeroEquals(T lhs, T rhs)
+    {
+        // MSVC 17 doesn't transform boolean equations into bitwise by itself.
+        // So I'm helping a bit. It's identical to: lhs && rhs && lhs == rhs
+        return (lhs != 0) & (rhs != 0) & (lhs == rhs);
+    }
+
     KeyChord::KeyChord(bool ctrl, bool alt, bool shift, bool win, int32_t vkey, int32_t scanCode) noexcept :
         KeyChord(modifiersFromBooleans(ctrl, alt, shift, win), vkey, scanCode)
     {
@@ -38,19 +47,46 @@ namespace winrt::Microsoft::Terminal::Control::implementation
         {
             _vkey = MapVirtualKeyW(scanCode, MAPVK_VSC_TO_VK_EX);
         }
+
+        assert(_vkey || _scanCode);
     }
 
-    VirtualKeyModifiers KeyChord::Modifiers() noexcept
+    uint64_t KeyChord::Hash() const noexcept
+    {
+        auto h = uint64_t(_modifiers) << 32;
+        h |= _vkey ? _vkey : _scanCode;
+
+        // I didn't like how std::hash uses the byte-wise FNV1a for integers.
+        // So I built my own std::hash with murmurhash3.
+        h ^= h >> 33;
+        h *= UINT64_C(0xff51afd7ed558ccd);
+        h ^= h >> 33;
+        h *= UINT64_C(0xc4ceb9fe1a85ec53);
+        h ^= h >> 33;
+
+        return h;
+    }
+
+    bool KeyChord::Equals(const Control::KeyChord& other) const noexcept
+    {
+        // Two KeyChords are equal if they have the same modifiers and either identical vkeys
+        // or scancodes. But since a value of 0 indicates that the vkey/scancode isn't set,
+        // we cannot simply use == to compare them. Hence we got nonZeroEquals.
+        const auto otherSelf = winrt::get_self<KeyChord>(other);
+        return _modifiers == otherSelf->_modifiers && (nonZeroEquals(_vkey, otherSelf->_vkey) || nonZeroEquals(_scanCode, otherSelf->_scanCode));
+    }
+
+    VirtualKeyModifiers KeyChord::Modifiers() const noexcept
     {
         return _modifiers;
     }
 
-    void KeyChord::Modifiers(VirtualKeyModifiers const& value) noexcept
+    void KeyChord::Modifiers(const VirtualKeyModifiers value) noexcept
     {
         _modifiers = value;
     }
 
-    int32_t KeyChord::Vkey() noexcept
+    int32_t KeyChord::Vkey() const noexcept
     {
         return _vkey;
     }
@@ -60,7 +96,7 @@ namespace winrt::Microsoft::Terminal::Control::implementation
         _vkey = value;
     }
 
-    int32_t KeyChord::ScanCode() noexcept
+    int32_t KeyChord::ScanCode() const noexcept
     {
         return _scanCode;
     }
